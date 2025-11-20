@@ -1,25 +1,45 @@
-require('dotenv').config();
 import { ethers } from "hardhat";
 
 async function main() {
-  const provider = new ethers.JsonRpcProvider(process.env.CELO_RPC_URL);
-  const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+  const [signer] = await ethers.getSigners();
 
-  const tokenShopAddress = "0x560E90cB8E377c6CD14f299F503b72E33988162C";
-  const buenoTokenAddress = "0x0b5dAf3Af94b52BDE1850e14255d9CC5877017E4";
+  // Deploy RobinHood
+  const RobinHood = await ethers.getContractFactory("RobinHood");
+  const RobinHood = await RobinHood.deploy();
+  await RobinHood.waitForDeployment();
+  const RobinHoodAddress = await RobinHood.getAddress();
+  console.log("RobinHood deployed at:", RobinHoodAddress);
 
-  const tokenShop = await ethers.getContractAt("TokenShop", tokenShopAddress, signer);
-  const buenoToken = await ethers.getContractAt("BuenoToken", buenoTokenAddress, signer);
+  // Deploy MockAggregator
+  const MockAggregator = await ethers.getContractFactory("MockAggregator");
+  const mockAggregator = await MockAggregator.deploy();
+  await mockAggregator.waitForDeployment();
+  const mockAggregatorAddress = await mockAggregator.getAddress();
+  console.log("MockAggregator deployed at:", mockAggregatorAddress);
 
-  const balanceBefore = await buenoToken.balanceOf(signer.address);
+  // Deploy TokenShop
+  const TokenShop = await ethers.getContractFactory("TokenShop");
+  const tokenShop = await TokenShop.deploy(RobinHoodAddress, mockAggregatorAddress);
+  await tokenShop.waitForDeployment();
+  const tokenShopAddress = await tokenShop.getAddress();
+  console.log("TokenShop deployed at:", tokenShopAddress);
+
+  // Grant MINTER_ROLE to TokenShop
+  const minterRole = await RobinHood.MINTER_ROLE();
+  await RobinHood.grantRole(minterRole, tokenShopAddress);
+  console.log("Granted MINTER_ROLE to TokenShop");
+
+  const balanceBefore = await RobinHood.balanceOf(signer.address);
   console.log("Token balance before buy:", ethers.formatEther(balanceBefore));
 
-  const tx = await tokenShop.buy({ value: ethers.parseEther("0.01") });
+  const tx = await tokenShop.connect(signer).buy({ value: ethers.parseEther("0.01") });
   console.log("Buy tx hash:", tx.hash);
   await tx.wait();
 
-  const balanceAfter = await buenoToken.balanceOf(signer.address);
+  const balanceAfter = await RobinHood.balanceOf(signer.address);
   console.log("Token balance after buy:", ethers.formatEther(balanceAfter));
+
+  console.log("Buy test passed: balance increased by", ethers.formatEther(balanceAfter - balanceBefore));
 }
 
 main().catch((error) => {
